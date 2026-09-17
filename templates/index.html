@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel de Foco ESP32</title>
+  <style>
+    :root {
+      --bg: #0f172a; --card: #1e293b; --text: #f8fafc;
+      --primary: #3b82f6; --primary-hover: #2563eb;
+      --on: #eab308; --off: #475569;
+    }
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 2rem 1rem; margin: 0; }
+    .container { max-width: 400px; width: 100%; display: flex; flex-direction: column; gap: 1.5rem; }
+    
+    .card { background: var(--card); border-radius: 1rem; padding: 1.5rem; text-align: center; }
+    
+    /* Foco animado */
+    .foco { font-size: 4rem; filter: grayscale(100%); transition: 0.3s; margin-bottom: 1rem; }
+    .foco.encendido { filter: grayscale(0%); transform: scale(1.1); text-shadow: 0 0 20px rgba(234, 179, 8, 0.6); }
+    .estado-txt { font-size: 1.2rem; font-weight: bold; margin-bottom: 1.5rem; }
+
+    /* Pestañas de modo */
+    .tabs { display: flex; background: #0b1120; border-radius: 0.5rem; overflow: hidden; margin-bottom: 1.5rem; }
+    .tab { flex: 1; padding: 0.75rem; border: none; background: transparent; color: #64748b; font-weight: bold; cursor: pointer; transition: 0.2s; }
+    .tab.active { background: var(--primary); color: white; }
+
+    /* Paneles de control */
+    .panel { display: none; flex-direction: column; gap: 1rem; }
+    .panel.active { display: flex; }
+
+    /* Botones manuales */
+    .btn-manual { padding: 1rem; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: bold; cursor: pointer; color: white; }
+    .btn-on { background: var(--on); color: black; }
+    .btn-off { background: var(--off); }
+    
+    /* Slider Automático */
+    .slider-container { text-align: left; background: #0b1120; padding: 1rem; border-radius: 0.5rem; }
+    .slider-container label { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    input[type=range] { width: 100%; }
+
+    /* Info del Sensor */
+    .sensor-info { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #334155; display: flex; justify-content: space-between; color: #94a3b8; font-size: 0.9rem; }
+    .sensor-val { color: var(--primary); font-weight: bold; font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="card">
+      <div id="iconoFoco" class="foco">💡</div>
+      <div id="txtEstado" class="estado-txt">Apagado</div>
+
+      <!-- Selector de Modo -->
+      <div class="tabs">
+        <button id="tabManual" class="tab" onclick="cambiarModo('MANUAL')">Modo Manual</button>
+        <button id="tabAuto" class="tab" onclick="cambiarModo('AUTO')">Modo Automático</button>
+      </div>
+
+      <!-- Panel Manual -->
+      <div id="panelManual" class="panel">
+        <button class="btn-manual btn-on" onclick="enviarComandoManual(1)">Prender Foco</button>
+        <button class="btn-manual btn-off" onclick="enviarComandoManual(0)">Apagar Foco</button>
+      </div>
+
+      <!-- Panel Automático -->
+      <div id="panelAuto" class="panel">
+        <div class="slider-container">
+          <label>
+            <span>Umbral de Oscuridad:</span>
+            <span id="lblUmbral">300</span>
+          </label>
+          <input type="range" min="0" max="4095" value="300" 
+                 onchange="cambiarUmbral(this.value)" 
+                 oninput="document.getElementById('lblUmbral').innerText = this.value">
+        </div>
+        <p style="font-size: 0.8rem; color: #94a3b8; margin: 0;">El foco se prenderá si el sensor supera este umbral.</p>
+      </div>
+
+      <!-- Monitoreo en vivo -->
+      <div class="sensor-info">
+        <span>Lectura Sensor LDR:</span>
+        <span id="valLdr" class="sensor-val">--</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let modoActual = "AUTO";
+
+    async function actualizarUI() {
+      try {
+        const res = await fetch('/api/estado');
+        const data = await res.json();
+
+        // 1. Actualizar Foco
+        const foco = document.getElementById('iconoFoco');
+        const txt = document.getElementById('txtEstado');
+        if (data.relay === 1) {
+          foco.classList.add('encendido');
+          txt.innerText = "Encendido";
+          txt.style.color = "var(--on)";
+        } else {
+          foco.classList.remove('encendido');
+          txt.innerText = "Apagado";
+          txt.style.color = "var(--text)";
+        }
+
+        // 2. Actualizar Sensor
+        document.getElementById('valLdr').innerText = data.ldr;
+
+        // 3. Sincronizar Pestañas si el servidor cambió de estado
+        if (data.modo !== modoActual) {
+          modoActual = data.modo;
+          renderizarPestañas();
+        }
+      } catch (err) {
+        console.error("Error conectando con servidor", err);
+      }
+    }
+
+    // Funciones de acción de usuario
+    async function cambiarModo(nuevoModo) {
+      modoActual = nuevoModo;
+      renderizarPestañas();
+      await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modo: nuevoModo })
+      });
+      actualizarUI();
+    }
+
+    async function enviarComandoManual(estado) {
+      await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado_manual: estado })
+      });
+      actualizarUI();
+    }
+
+    async function cambiarUmbral(valor) {
+      await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ umbral: valor })
+      });
+    }
+
+    // Cambia visualmente qué panel se está mostrando
+    function renderizarPestañas() {
+      document.getElementById('tabManual').classList.toggle('active', modoActual === 'MANUAL');
+      document.getElementById('tabAuto').classList.toggle('active', modoActual === 'AUTO');
+      
+      document.getElementById('panelManual').classList.toggle('active', modoActual === 'MANUAL');
+      document.getElementById('panelAuto').classList.toggle('active', modoActual === 'AUTO');
+    }
+
+    // Iniciar bucle de refresco
+    setInterval(actualizarUI, 1000);
+    actualizarUI();
+  </script>
+</body>
+</html>
