@@ -52,6 +52,11 @@
       <div id="iconoFoco" class="foco">💡</div>
       <div id="txtEstado" class="estado-txt">Apagado</div>
 
+      <!-- ESTADO DE CONEXIÓN -->
+      <div id="estadoConexion" style="font-size: 0.9rem; margin-bottom: 1.5rem; color: #94a3b8; font-weight: bold;">
+        🔴 Desconectado
+      </div>
+
       <!-- Selector de Modo -->
       <div class="tabs">
         <button id="tabManual" class="tab" onclick="cambiarModo('MANUAL')">Modo Manual</button>
@@ -110,7 +115,17 @@
         // 2. Actualizar Sensor
         document.getElementById('valLdr').innerText = data.ldr;
 
-        // 3. Sincronizar Pestañas si el servidor cambió de estado
+        // 3. Actualizar Estado de Conexión
+        const conn = document.getElementById('estadoConexion');
+        if (data.conectado) {
+          conn.innerText = "🟢 Conectado al ESP32";
+          conn.style.color = "#22c55e"; // Verde
+        } else {
+          conn.innerText = "🔴 ESP32 Desconectado";
+          conn.style.color = "#ef4444"; // Rojo
+        }
+
+        // 4. Sincronizar Pestañas si el servidor cambió de estado
         if (data.modo !== modoActual) {
           modoActual = data.modo;
           renderizarPestañas();

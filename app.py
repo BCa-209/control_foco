@@ -1,3 +1,4 @@
+import time
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
@@ -9,7 +10,8 @@ estado_sistema = {
     "relay": 0,           # La orden final que se envía al ESP32
     "ldr": 0,             # Última lectura del LDR
     "umbral": 300,        # Sensibilidad de oscuridad
-    "conectado": False
+    "conectado": False,
+    "last_seen": 0        # Última vez que el ESP32 se comunicó
 }
 
 @app.route("/")
@@ -18,6 +20,10 @@ def index():
 
 @app.route("/api/estado", methods=["GET"])
 def obtener_estado():
+    # Si han pasado más de 10 segundos sin señal del ESP32, marcar como desconectado
+    if time.time() - estado_sistema.get("last_seen", 0) > 10:
+        estado_sistema["conectado"] = False
+
     return jsonify(estado_sistema)
 
 @app.route("/api/control", methods=["POST"])
@@ -46,6 +52,7 @@ def endpoint_esp():
     if ldr_valor is not None:
         estado_sistema["ldr"] = ldr_valor
         estado_sistema["conectado"] = True
+        estado_sistema["last_seen"] = time.time()
 
         # Si estamos en modo automático, el servidor decide según el sensor
         if estado_sistema["modo"] == "AUTO":

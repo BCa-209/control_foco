@@ -1,68 +1,126 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 // ====== CONFIGURACIÓN WI-FI ======
-const char* ssid = "TU_NOMBRE_DE_WIFI";
-const char* password = "TU_PASSWORD_WIFI";
+//const char* ssid = "DESKTOP-TSJBC22-6549";
+const char* ssid = "HONOR X7b";
+//const char* password = "12345678900";
+const char* password = "123456789";
 
-// IP de la computadora donde corre el servidor Python Flask
-// (Averíguala en Windows con 'ipconfig' o en Linux/Mac con 'ifconfig')
-const char* serverUrl = "http://192.168.1.50:5000/api/esp";
+// ====== SERVIDOR ======
+const char* serverUrl = "https://control-foco.vercel.app/api/esp";
 
 // ====== PINES ======
 const int LDR_PIN = 34;
 const int RELAY_PIN = 5;
 
+// ====== UMBRAL ======
+const int UMBRAL_LUZ = 100;
+
 void setup() {
   Serial.begin(115200);
+
   pinMode(LDR_PIN, INPUT);
-  
-  // Inicializar relé apagado
-  pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW); // Si tu módulo de relé es activo bajo, usa HIGH
+
+  // Igual que tu código original:
+  // el relé comienza apagado/flotando.
+  pinMode(RELAY_PIN, INPUT);
 
   Serial.println("\nConectando a Wi-Fi...");
+
   WiFi.begin(ssid, password);
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\n¡Conectado!");
+
+  Serial.println("\n¡Wi-Fi conectado!");
   Serial.print("IP del ESP32: ");
   Serial.println(WiFi.localIP());
 }
 
 void loop() {
-  if (WiFi.status() == WL_CONNECTED) {
-    int valorLDR = analogRead(LDR_PIN);
 
-    HTTPClient http;
-    // Enviamos el valor actual del LDR al servidor Python
-    String url = String(serverUrl) + "?ldr=" + String(valorLDR);
-    http.begin(url);
-    int httpCode = http.GET();
+  // ====== LEER LDR ======
+  int valorLDR = analogRead(LDR_PIN);
 
-    if (httpCode == HTTP_CODE_OK) {
-      String response = http.getString();
-      Serial.print("LDR: ");
-      Serial.print(valorLDR);
-      Serial.print(" | Respuesta Servidor: ");
-      Serial.println(response);
+  Serial.print("AO: ");
+  Serial.print(valorLDR);
 
-      // Buscamos si el servidor nos dijo relay:1 o relay:0
-      if (response.indexOf("\"relay\":1") > 0) {
-        digitalWrite(RELAY_PIN, HIGH); // Encender foco
-      } else {
-        digitalWrite(RELAY_PIN, LOW);  // Apagar foco
-      }
+  if (WiFi.status() != WL_CONNECTED) {
+    // Si no hay Wi-Fi, usar lógica local
+    bool oscuro = (valorLDR > UMBRAL_LUZ);
+    if (oscuro) {
+      Serial.println(" -> OSCURO (Modo Local)");
+      pinMode(RELAY_PIN, OUTPUT);
+      digitalWrite(RELAY_PIN, HIGH);
     } else {
-      Serial.print("Error en petición HTTP: ");
-      Serial.println(httpCode);
+      Serial.println(" -> LUZ (Modo Local)");
+      pinMode(RELAY_PIN, INPUT);
     }
-    http.end();
   } else {
-    Serial.println("Wi-Fi desconectado...");
+    Serial.println(); // Salto de línea si hay Wi-Fi
   }
 
-  delay(1000); // Consulta cada segundo
+  // ====== ENVIAR LDR AL SERVIDOR ======
+  if (WiFi.status() == WL_CONNECTED) {
+
+    WiFiClientSecure client;
+    client.setInsecure();
+
+    HTTPClient http;
+
+    String url = String(serverUrl) + "?ldr=" + String(valorLDR);
+
+    Serial.print("Enviando: ");
+    Serial.println(url);
+
+    if (http.begin(client, url)) {
+
+      int httpCode = http.GET();
+
+      if (httpCode > 0) {
+
+        Serial.print("HTTP: ");
+        Serial.println(httpCode);
+
+        String response = http.getString();
+
+        Serial.print("Servidor: ");
+        Serial.println(response);
+
+        // --- APLICAR ESTADO SEGÚN RESPUESTA ---
+        // Se busca el valor de "relay" en el JSON devuelto
+        if (response.indexOf("\"relay\": 1") != -1 || response.indexOf("\"relay\":1") != -1) {
+          Serial.println("-> Comando API: ENCENDER");
+          pinMode(RELAY_PIN, OUTPUT);
+          digitalWrite(RELAY_PIN, HIGH);
+        } else if (response.indexOf("\"relay\": 0") != -1 || response.indexOf("\"relay\":0") != -1) {
+          Serial.println("-> Comando API: APAGAR");
+          pinMode(RELAY_PIN, INPUT);
+        }
+
+      } else {
+
+        Serial.print("Error HTTP: ");
+        Serial.println(http.errorToString(httpCode));
+
+      }
+
+      http.end();
+
+    } else {
+
+      Serial.println("No se pudo iniciar conexión HTTPS");
+
+    }
+  } else {
+
+    Serial.println("Wi-Fi desconectado...");
+
+  }
+
+  delay(500);
 }
